@@ -1,0 +1,1912 @@
+import { useState, useEffect, useMemo, ChangeEvent, useRef } from 'react';
+import { 
+  Shield, 
+  Camera,
+  Folder, 
+  RotateCcw, 
+  Search, 
+  Sliders, 
+  Save, 
+  FileDown, 
+  Trash2, 
+  X,
+  CheckCircle2,
+  AlertCircle,
+  Video,
+  FileText,
+  Check,
+  Layout,
+  Circle,
+  Calendar,
+  Cpu,
+  Database,
+  ShieldCheck,
+  Eye
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { jsPDF } from 'jspdf';
+
+// --- Types & Constants ---
+
+interface CameraModel {
+  name: string;
+  resolution: string;
+  bitrate: number;
+}
+
+interface CameraGroup {
+  id: string;
+  name?: string;
+  label?: string;
+  count: number;
+  resolution: string;
+  bitrate: number;
+  compression: string;
+  customMP?: number;
+}
+
+interface Project {
+  id: number;
+  name: string;
+  cameraGroups?: CameraGroup[]; // Support multiple groups
+  numCameras: number;
+  bitrate: number;
+  days: number;
+  mode: '24' | 'motion' | 'alarm';
+  existingTB: number;
+  resolution: string;
+  compression: string;
+  department: string;
+  date: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  companyName?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  companyLogo?: string;
+  customerLogo?: string;
+  additionalNotes?: string;
+  customHeader?: string;
+  customFooter?: string;
+  customMP?: number;
+  projectDeadline?: string;
+  projectManager?: string;
+  history?: any[];
+}
+
+const CAMERA_DB: CameraModel[] = [
+  { name: "Hikvision Pro 4K (DS-2CD3386)", resolution: "8", bitrate: 8.5 },
+  { name: "Hikvision ColorVu 4MP (DS-2CD2347G2)", resolution: "4", bitrate: 6.2 },
+  { name: "Hikvision AcuSense 2MP (DS-2CD2023G2)", resolution: "2", bitrate: 4.1 },
+  { name: "Hikvision DarkFighter 4MP", resolution: "4", bitrate: 7.0 },
+  { name: "Dahua WizMind 8MP (IPC-HDBW5842H)", resolution: "8", bitrate: 9.2 },
+  { name: "Dahua WizSense 4MP (IPC-HFW3441T)", resolution: "4", bitrate: 5.8 },
+  { name: "Dahua Starlight 2MP", resolution: "2", bitrate: 3.8 },
+  { name: "Axis P3248-LV (4K)", resolution: "8", bitrate: 10.5 },
+  { name: "Axis M3067-P (Panoramic 6MP)", resolution: "8", bitrate: 8.0 },
+  { name: "Axis Q1615 Mk III (FHD)", resolution: "2", bitrate: 5.5 },
+  { name: "Bosch FLEXIDOME 8000i (4K)", resolution: "8", bitrate: 11.2 },
+  { name: "Bosch DINION IP 5000 (5MP)", resolution: "8", bitrate: 7.5 },
+  { name: "Hanwha XNV-9082R (4K)", resolution: "8", bitrate: 9.8 },
+  { name: "Hanwha QNV-7082R (4MP)", resolution: "4", bitrate: 5.5 },
+  { name: "Uniview Prime 8MP", resolution: "8", bitrate: 8.8 },
+  { name: "Uniview Lighthunter 4MP", resolution: "4", bitrate: 6.0 },
+  { name: "Reolink 810A (8MP)", resolution: "8", bitrate: 7.5 },
+  { name: "Generic 8MP / 4K UHD", resolution: "8", bitrate: 8.0 },
+  { name: "Generic 5MP Super HD", resolution: "8", bitrate: 6.5 },
+  { name: "Generic 4MP Quad HD", resolution: "4", bitrate: 5.0 },
+  { name: "Generic 2MP Full HD", resolution: "2", bitrate: 3.5 },
+];
+
+export default function App() {
+  const [cameraGroups, setCameraGroups] = useState<CameraGroup[]>([
+    { id: Date.now().toString(), count: 32, resolution: "8", bitrate: 8, compression: "H.265+ High Efficiency" }
+  ]);
+  const [projectDeadline, setProjectDeadline] = useState("");
+  const [projectManager, setProjectManager] = useState("");
+  const [mode, setMode] = useState<'24' | 'motion' | 'alarm'>('24');
+  const [alarmHours, setAlarmHours] = useState<number>(4);
+  const [days, setDays] = useState<number>(30);
+  const [existingTB, setExistingTB] = useState<number>(4);
+  const [recorderBrand, setRecorderBrand] = useState("Hikvision");
+  const [channels, setChannels] = useState<number>(16);
+  const [hddSlots, setHddSlots] = useState<number>(1);
+  const [projectContext, setProjectContext] = useState<"new" | "upgrade">("upgrade");
+  const [department, setDepartment] = useState("TECHNICAL SERVICES DEPARTMENT");
+  const [customerName, setCustomerName] = useState("Global Logistics Hub");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [companyName, setCompanyName] = useState("SecureWatch Solutions Inc.");
+  const [companyPhone, setCompanyPhone] = useState("+267 71 234 567");
+  const [companyEmail, setCompanyEmail] = useState("ops@securewatch.com");
+  const [companyLogo, setCompanyLogo] = useState<string | null>(null);
+  const [customerLogo, setCustomerLogo] = useState<string | null>(null);
+  const [additionalNotes, setAdditionalNotes] = useState("• Storage architecture assumes RAID 6 configuration for maximum data integrity.\n• Dedicated surveillance-grade drives (enterprise-class) are required for 24/7 duty cycles.\n• Network bandwidth assessment recommended for centralized recording server.");
+  const [customHeader, setCustomHeader] = useState("CCTV STORAGE AUDIT");
+  const [customFooter, setCustomFooter] = useState("Generated by Checkit Pro • Professional CCTV Storage Planner");
+  const [currentProjectId, setCurrentProjectId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [showProjectsModal, setShowProjectsModal] = useState(false);
+  const [showReportPreview, setShowReportPreview] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return CAMERA_DB.filter(c => 
+      c.name.toLowerCase().includes(searchQuery.toLowerCase())
+    ).slice(0, 5); // Limit to top 5 for cleaner UI
+  }, [searchQuery]);
+
+  // Simplified getters for legacy/internal use
+  const numCameras = useMemo(() => cameraGroups.reduce((sum, g) => sum + g.count, 0), [cameraGroups]);
+
+  // Load projects and company info from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('checkitProjects');
+    if (saved) {
+      try {
+        setProjects(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to load projects", e);
+      }
+    }
+
+    const savedCompany = localStorage.getItem('checkitCompanyInfo');
+    if (savedCompany) {
+      try {
+        const info = JSON.parse(savedCompany);
+        setCompanyName(info.name || "");
+        setCompanyPhone(info.phone || "");
+        setCompanyEmail(info.email || "");
+        setCompanyLogo(info.logo || null);
+        setCustomHeader(info.header || "CCTV STORAGE QUOTE");
+        setCustomFooter(info.footer || "Generated by Checkit • Professional CCTV Storage Planner");
+      } catch (e) {
+        console.error("Failed to load company info", e);
+      }
+    }
+  }, []);
+
+  // Auto-save effect
+  useEffect(() => {
+    const draftData = {
+      customerName,
+      customerPhone,
+      customerEmail,
+      customerLogo,
+      cameraGroups,
+      days,
+      mode,
+      alarmHours,
+      additionalNotes,
+      customHeader,
+      customFooter,
+      projectDeadline,
+      projectManager,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('checkit_draft', JSON.stringify(draftData));
+  }, [
+    customerName, customerPhone, customerEmail, customerLogo,
+    cameraGroups, days, mode, alarmHours,
+    additionalNotes, customHeader, customFooter,
+    projectDeadline, projectManager
+  ]);
+
+  // Load draft on mount if no current project
+  useEffect(() => {
+    if (!currentProjectId) {
+      const savedDraft = localStorage.getItem('checkit_draft');
+      if (savedDraft) {
+        try {
+          const draft = JSON.parse(savedDraft);
+          // Only restore if it's relatively fresh (within last 1 hour)
+          if (Date.now() - draft.timestamp < 3600000) {
+            setCustomerName(draft.customerName || "");
+            setCustomerPhone(draft.customerPhone || "");
+            setCustomerEmail(draft.customerEmail || "");
+            setCustomerLogo(draft.customerLogo || null);
+            if (draft.cameraGroups) {
+              setCameraGroups(draft.cameraGroups);
+            } else if (draft.numCameras) {
+               // Backward compatibility for old drafts
+               setCameraGroups([{
+                 id: Date.now().toString(),
+                 count: draft.numCameras,
+                 resolution: draft.resolution || "8",
+                 bitrate: draft.bitrate || 8,
+                 compression: draft.compression || "H.265+ High Efficiency",
+                 customMP: draft.customMP
+               }]);
+            }
+            setDays(draft.days || 30);
+            setMode(draft.mode || '24');
+            setAlarmHours(draft.alarmHours || 4);
+            setAdditionalNotes(draft.additionalNotes || "");
+            if (draft.customHeader) setCustomHeader(draft.customHeader);
+            if (draft.customFooter) setCustomFooter(draft.customFooter);
+            if (draft.projectDeadline) setProjectDeadline(draft.projectDeadline);
+            if (draft.projectManager) setProjectManager(draft.projectManager);
+          }
+        } catch (e) {
+          console.error("Error loading draft", e);
+        }
+      }
+    }
+  }, []);
+
+  // Sync company info to localStorage
+  useEffect(() => {
+    const info = { 
+      name: companyName, 
+      phone: companyPhone, 
+      email: companyEmail, 
+      logo: companyLogo,
+      department,
+      header: customHeader,
+      footer: customFooter
+    };
+    localStorage.setItem('checkitCompanyInfo', JSON.stringify(info));
+  }, [companyName, companyPhone, companyEmail, companyLogo, department, customHeader, customFooter]);
+
+  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>, setter: (val: string | null) => void) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        setSuccessMessage("Logo file is too large. Please use an image under 2MB.");
+        setTimeout(() => setSuccessMessage(null), 3000);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setter(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Calculations
+  const results = useMemo(() => {
+    const hoursPerDay = mode === '24' ? 24 : mode === 'motion' ? 12 : alarmHours;
+    
+    let totalTB = 0;
+    let dailyGB = 0;
+    let totalBitrateCount = 0;
+    let weightedBitrateSum = 0;
+
+    cameraGroups.forEach(group => {
+      const gbPerCamDay = (group.bitrate * 3600 * hoursPerDay) / (8 * 1024);
+      dailyGB += (gbPerCamDay * group.count);
+      totalTB += (gbPerCamDay * group.count * days) / 1024;
+      
+      weightedBitrateSum += (group.bitrate * group.count);
+      totalBitrateCount += group.count;
+    });
+    
+    const bufferedTotalTB = totalTB * 1.15;
+    const avgBitrate = totalBitrateCount > 0 ? (weightedBitrateSum / totalBitrateCount).toFixed(2) : "0";
+    
+    return {
+      daily: dailyGB.toFixed(1),
+      total: totalTB.toFixed(1),
+      totalBuffered: bufferedTotalTB.toFixed(1),
+      avgBitrate,
+      daysWithCurrent: dailyGB > 0 ? Math.floor((existingTB * 1024) / dailyGB) : 0,
+      isUnder: existingTB >= totalTB
+    };
+  }, [cameraGroups, days, mode, existingTB, alarmHours]);
+
+  const calculateBitrate = (res: string, compression: string, customMP: number) => {
+    const factor = compression === "H.264" ? 1.0 : compression === "H.265" ? 0.7 : 0.5;
+    if (res === 'custom') {
+      return (customMP * 2) * factor; // Using MP * 2 as a consistent base
+    }
+    const resNum = parseFloat(res);
+    const base = !isNaN(resNum) ? resNum * 2 : 4;
+    return base * factor;
+  };
+
+  const updateGroup = (id: string, updates: Partial<CameraGroup>) => {
+    setCameraGroups(prev => prev.map(g => {
+      if (g.id !== id) return g;
+      const updated = { ...g, ...updates };
+      // If resolution or compression changed, recalculate bitrate if not manually overridden
+      if (updates.resolution || updates.compression || updates.customMP) {
+         updated.bitrate = calculateBitrate(updated.resolution, updated.compression, updated.customMP || 12);
+      }
+      return updated;
+    }));
+  };
+
+  const addCameraGroup = (specs?: Partial<CameraGroup>) => {
+    const newGroup: CameraGroup = {
+      id: Date.now().toString(),
+      count: 1,
+      resolution: "2",
+      bitrate: 4,
+      compression: "H.265+ High Efficiency",
+      ...specs
+    };
+    setCameraGroups(prev => [...prev, newGroup]);
+  };
+
+  const removeCameraGroup = (id: string) => {
+    if (cameraGroups.length <= 1) {
+      showTemporarySuccess("At least one camera group is required");
+      return;
+    }
+    setCameraGroups(prev => prev.filter(g => g.id !== id));
+  };
+
+  const handleSearch = () => {
+    const found = CAMERA_DB.find(c => c.name.toLowerCase() === searchQuery.toLowerCase().trim()) || 
+                  CAMERA_DB.find(c => c.name.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+    if (found) {
+      selectSuggestion(found);
+    } else {
+      alert(`" ${searchQuery} " not found in the professional camera database.`);
+    }
+  };
+
+  const selectSuggestion = (model: CameraModel) => {
+    addCameraGroup({
+      name: model.name,
+      resolution: model.resolution,
+      bitrate: model.bitrate,
+      compression: "H.265+ High Efficiency",
+      count: 1
+    });
+    showTemporarySuccess(`Added: ${model.name}`);
+    setSearchQuery("");
+    setShowSuggestions(false);
+  };
+
+  const showTemporarySuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    setTimeout(() => setSuccessMessage(null), 3000);
+  };
+
+  const saveProject = () => {
+    const name = customerName || prompt("Enter project name:", `Project ${new Date().toLocaleDateString()}`);
+    if (!name) return;
+
+    let updatedProjects = [...projects];
+    const projectData: Project = {
+      id: currentProjectId || Date.now(),
+      name,
+      cameraGroups,
+      numCameras,
+      bitrate: cameraGroups[0]?.bitrate || 8, // For legacy compatibility
+      days,
+      mode,
+      existingTB,
+      resolution: cameraGroups[0]?.resolution || "8", // For legacy compatibility
+      compression: cameraGroups[0]?.compression || "H.265+ High Efficiency", // For legacy compatibility
+      customerPhone,
+      customerEmail,
+      companyName,
+      companyPhone,
+      companyEmail,
+      companyLogo: companyLogo || undefined,
+      customerLogo: customerLogo || undefined,
+      additionalNotes,
+      customHeader,
+      customFooter,
+      customMP: cameraGroups[0]?.customMP,
+      projectDeadline,
+      projectManager,
+      date: new Date().toLocaleString(),
+      department,
+      history: []
+    };
+
+    if (currentProjectId) {
+      const index = updatedProjects.findIndex(p => p.id === currentProjectId);
+      if (index !== -1) {
+        const oldProject = updatedProjects[index];
+        projectData.history = oldProject.history || [];
+        
+        // Create a diff-like record for history
+        const timestamp = new Date().toLocaleString();
+        const snapshot = { 
+          ...oldProject, 
+          history: undefined, 
+          historyTimestamp: timestamp 
+        };
+        
+        const historyEntry = {
+          timestamp,
+          id: Date.now(),
+          snapshot
+        };
+
+        projectData.history = [historyEntry, ...projectData.history].slice(0, 5);
+        updatedProjects[index] = projectData;
+      }
+    } else {
+      updatedProjects.unshift(projectData);
+      setCurrentProjectId(projectData.id);
+    }
+
+    setProjects(updatedProjects);
+    localStorage.setItem('checkitProjects', JSON.stringify(updatedProjects));
+    showTemporarySuccess(`Project "${name}" saved/updated!`);
+  };
+
+  const loadProject = (p: Project) => {
+    setCurrentProjectId(p.id);
+    setCustomerName(p.name);
+    if (p.cameraGroups) {
+      setCameraGroups(p.cameraGroups);
+    } else {
+      // Legacy load
+      setCameraGroups([{
+        id: Date.now().toString(),
+        count: p.numCameras,
+        resolution: p.resolution,
+        bitrate: p.bitrate,
+        compression: p.compression,
+        customMP: p.customMP
+      }]);
+    }
+    setDays(p.days);
+    setMode(p.mode);
+    setExistingTB(p.existingTB || 0);
+    setCustomerPhone(p.customerPhone || "");
+    setCustomerEmail(p.customerEmail || "");
+    setCustomerLogo(p.customerLogo || null);
+    setAdditionalNotes(p.additionalNotes || "");
+    if (p.customHeader) setCustomHeader(p.customHeader);
+    if (p.customFooter) setCustomFooter(p.customFooter);
+    setProjectDeadline(p.projectDeadline || "");
+    setProjectManager(p.projectManager || "");
+    setShowProjectsModal(false);
+    showTemporarySuccess(`Loaded: ${p.name}`);
+  };
+
+  const revertToHistory = (snapshot: any) => {
+    if (confirm("Revert to this previous configuration?")) {
+      setCustomerName(snapshot.name || "");
+      setCustomerPhone(snapshot.customerPhone || "");
+      setCustomerEmail(snapshot.customerEmail || "");
+      setCustomerLogo(snapshot.customerLogo || null);
+      if (snapshot.cameraGroups) {
+        setCameraGroups(snapshot.cameraGroups);
+      } else {
+        setCameraGroups([{
+          id: Date.now().toString(),
+          count: snapshot.numCameras,
+          resolution: snapshot.resolution,
+          bitrate: snapshot.bitrate,
+          compression: snapshot.compression,
+          customMP: snapshot.customMP
+        }]);
+      }
+      setDays(snapshot.days);
+      setMode(snapshot.mode);
+      setExistingTB(snapshot.existingTB || 0);
+      setAdditionalNotes(snapshot.notes || snapshot.additionalNotes || "");
+      if (snapshot.customHeader) setCustomHeader(snapshot.customHeader);
+      if (snapshot.customFooter) setCustomFooter(snapshot.customFooter);
+      showTemporarySuccess("Restored configuration from history");
+    }
+  };
+
+  const deleteProject = (id: number) => {
+    const updated = projects.filter(p => p.id !== id);
+    if (currentProjectId === id) setCurrentProjectId(null);
+    setProjects(updated);
+    localStorage.setItem('checkitProjects', JSON.stringify(updated));
+    showTemporarySuccess("Project removed from ledger");
+  };
+
+  const generatePDF = () => {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const customer = customerName || "Valued Customer";
+    const company = companyName || "SecureWatch Solutions Inc.";
+    
+    // --- 1. HEADER SECTION ---
+    let y = 20;
+    
+    // Company Header (Left)
+    doc.setTextColor(15, 23, 42); // Slate 900
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text(company, 15, y + 4);
+    
+    doc.setTextColor(100, 116, 139); // Slate 500
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text(department.toUpperCase(), 15, y + 10);
+
+    if (companyLogo) {
+      try {
+        const format = companyLogo.includes('image/png') ? 'PNG' : 'JPEG';
+        doc.addImage(companyLogo, format, 15, y + 14, 40, 15, undefined, 'FAST');
+      } catch (e) {}
+    }
+
+    // Client/Date Side (Right)
+    doc.setTextColor(16, 185, 129); // Emerald 500
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("CLIENT", pageWidth - 15, y, { align: "right" });
+    
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text(customer, pageWidth - 15, y + 5, { align: "right" });
+    
+    doc.setTextColor(16, 185, 129);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("QUOTE DATE", pageWidth - 15, y + 12, { align: "right" });
+    
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), pageWidth - 15, y + 17, { align: "right" });
+
+    let currentY = y + 17;
+    if (projectDeadline) {
+      currentY += 8;
+      doc.setTextColor(16, 185, 129);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.text("TARGET DEADLINE", pageWidth - 15, currentY, { align: "right" });
+      currentY += 5;
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(new Date(projectDeadline).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), pageWidth - 15, currentY, { align: "right" });
+    }
+
+    if (projectManager) {
+      currentY += 8;
+      doc.setTextColor(16, 185, 129);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.text("PROJECT LEAD", pageWidth - 15, currentY, { align: "right" });
+      currentY += 5;
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(projectManager, pageWidth - 15, currentY, { align: "right" });
+    }
+
+    // Green Checkmark icon top right (adjust Y if needed, but it's okay floating)
+    doc.setFillColor(16, 185, 129);
+    doc.circle(pageWidth - 20, y + 25, 4, "F");
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.5);
+    doc.line(pageWidth - 22, y + 25, pageWidth - 20, y + 27);
+    doc.line(pageWidth - 20, y + 27, pageWidth - 18, y + 23);
+
+    // --- 2. PROJECT SPECIFICATIONS SECTION ---
+    y += 45;
+    const breakdownHeight = cameraGroups.length * 10;
+    const specBoxHeight = 55 + breakdownHeight;
+    doc.setFillColor(248, 250, 252); // Slate 50
+    doc.setDrawColor(241, 245, 249); // Slate 100
+    doc.roundedRect(15, y, pageWidth - 30, specBoxHeight, 2, 2, "FD");
+
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("PROJECT AUDIT OVERVIEW", 25, y + 10);
+    
+    const drawGridItem = (label: string, value: string, icon: string, x: number, yPos: number, colWidth: number) => {
+      const iconColor = [16, 185, 129]; // Emerald 500
+      doc.setDrawColor(iconColor[0], iconColor[1], iconColor[2]);
+      doc.setLineWidth(0.4);
+      
+      const ix = x + 2;
+      const iy = yPos - 1.5;
+
+      // Draw simplified icons
+      if (icon === 'camera') {
+        doc.roundedRect(ix - 2, iy - 2, 4, 3, 0.5, 0.5);
+      } else if (icon === 'mode') {
+        doc.circle(ix, iy, 2);
+      } else if (icon === 'date') {
+        doc.rect(ix - 2.5, iy - 2, 5, 4);
+      }
+
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text(label.toUpperCase(), x + 8, yPos - 1.5);
+      
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text(value, x + colWidth - 5, yPos - 1.5, { align: "right" });
+    };
+
+    y += 20;
+    const colWidth = (pageWidth - 70) / 2;
+    const col1 = 25;
+    const col2 = col1 + colWidth + 20;
+    
+    drawGridItem("Retention Period", `${days} Days`, "date", col1, y, colWidth);
+    const modeLabel = mode === '24' ? "Continuous (24/7)" : mode === 'motion' ? "Motion (Variable)" : `Alarm (${alarmHours}h/Day)`;
+    drawGridItem("Recording Mode", modeLabel, "mode", col2, y, colWidth);
+    
+    y += 10;
+    drawGridItem("Total Device Count", `${numCameras} Units`, "camera", col1, y, colWidth);
+    drawGridItem("Avg. Bitrate", `${results.avgBitrate} Mbps`, "mode", col2, y, colWidth);
+    
+    y += 10;
+    drawGridItem("NVR/DVR Brand", recorderBrand, "mode", col1, y, colWidth);
+    drawGridItem("HDD Slots", `${hddSlots} Bays`, "mode", col2, y, colWidth);
+    
+    y += 10;
+    drawGridItem("Channels", `${channels} CH`, "mode", col1, y, colWidth);
+    drawGridItem("Existing Storage", `${existingTB} TB`, "date", col2, y, colWidth);
+    
+    y += 10;
+    drawGridItem("Project Context", projectContext === 'new' ? 'New Installation' : 'Upgrade/Existing', "alert", col1, y, colWidth);
+    drawGridItem("Est. Retention", `${results.daysWithCurrent} Days`, "date", col2, y, colWidth);
+    
+    y += 10;
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
+    doc.line(25, y, pageWidth - 25, y);
+    
+    y += 8;
+    doc.setTextColor(16, 185, 129);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("DEVICE BREAKDOWN", 25, y);
+
+    let spacingMode = "standard";
+    if (cameraGroups.length > 5) spacingMode = "tight";
+
+    cameraGroups.forEach((group, idx) => {
+      const rowHeight = spacingMode === "tight" ? 8 : 10;
+      y += rowHeight;
+      
+      // Before drawing, check if we need a page break soon
+      // We want to fit at least 3 groups before the summary block moves to the next page
+      const summaryBlockHeight = 135;
+      const isLastThree = idx >= cameraGroups.length - 3;
+      
+      if (y > pageHeight - 45) {
+        doc.addPage();
+        y = 20;
+        doc.setTextColor(16, 185, 129);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.text("DEVICE BREAKDOWN (CONTINUED)", 25, y);
+        y += 10;
+      }
+      
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(rowHeight - 1);
+      doc.setFont("helvetica", "bold");
+      const resLabel = group.resolution === 'custom' ? `${group.customMP}MP` : `${group.resolution}MP`;
+      const groupLabel = group.label ? `${group.label.toUpperCase()} - ` : "";
+      doc.text(`${idx + 1}. ${groupLabel}${group.count}x ${resLabel} Cameras`, 25, y);
+      
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(rowHeight - 2);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${group.compression} @ ${group.bitrate} Mbps`, 70, y);
+      
+      const subtotal = ((group.bitrate * 3600 * (mode === '24' ? 24 : mode === 'motion' ? 12 : alarmHours) * group.count * days) / (8 * 1024 * 1024)).toFixed(2);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${subtotal} TB`, pageWidth - 25, y, { align: "right" });
+    });
+
+    const checkPageBreak = (needed: number) => {
+      if (y + needed > pageHeight - 35) {
+        doc.addPage();
+        y = 20;
+        return true;
+      }
+      return false;
+    };
+
+    // --- 3. SUMMARY BLOCK (Storage + Notes) ---
+    // This entire block (Storage Box + Notes section) must stick together.
+    const SUMMARY_BLOCK_HEIGHT = 65;
+    y += 10;
+    
+    // If not enough space for the full block, move to next page
+    if (y + SUMMARY_BLOCK_HEIGHT > pageHeight - 35) {
+      doc.addPage();
+      y = 20;
+    }
+    
+    // Total Storage Box
+    const boxY = y;
+    // Box Shadow effect
+    doc.setFillColor(0, 0, 0);
+    if ((doc as any).GState) {
+        doc.setGState(new (doc as any).GState({ opacity: 0.1 }));
+        doc.roundedRect(42, y + 2, pageWidth - 84, 30, 2, 2, "F");
+        doc.setGState(new (doc as any).GState({ opacity: 1.0 }));
+    }
+    
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(15, 23, 42);
+    doc.setLineWidth(0.6);
+    doc.roundedRect(40, y, pageWidth - 80, 30, 1, 1, "FD");
+    
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "bold");
+    doc.text("TOTAL STORAGE REQUIRED", pageWidth / 2, y + 6, { align: "center", charSpace: 0.5 });
+    
+    doc.setTextColor(16, 185, 129);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${results.total}`, pageWidth / 2 - 4, y + 15, { align: "center" });
+    doc.setFontSize(8);
+    doc.text("TB", pageWidth / 2 + 10, y + 15);
+
+    doc.setTextColor(71, 85, 105);
+    doc.setFontSize(5);
+    doc.setFont("helvetica", "bold");
+    doc.text(`EXISTING ${existingTB}TB HDD PROVIDES APPROX. ${results.daysWithCurrent} DAYS`, pageWidth / 2, y + 21, { align: "center" });
+
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(4);
+    doc.setFont("helvetica", "italic");
+    doc.text(`Calculated for ${days} days target retention with 15% system buffer.`, pageWidth / 2, y + 26, { align: "center" });
+
+    // --- 4. BOTTOM SECTIONS (Notes & Secure Badge) ---
+    y += 35;
+    
+    // Notes Card
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(15, y, pageWidth - 85, 25, 1, 1, "FD");
+    
+    doc.setTextColor(16, 185, 129);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("IMPLEMENTATION NOTES", 25, y + 6);
+    
+    doc.setTextColor(71, 85, 105);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    const notesArr = additionalNotes.split('\n').filter(l => l.trim()).slice(0, 3);
+    notesArr.forEach((note, i) => {
+       const cleanNote = note.replace(/^[•\-\*]\s*/, '');
+       doc.setFillColor(16, 185, 129);
+       doc.circle(27, y + 11 + (i * 4.5), 0.8, "F");
+       doc.text(cleanNote, 30, y + 12 + (i * 4.5), { maxWidth: pageWidth - 100 });
+    });
+
+    // Secure Box
+    const badgeWidth = 55;
+    const badgeHeight = 25;
+    doc.setFillColor(6, 78, 59); // Dark emerald
+    doc.rect(pageWidth - 15 - badgeWidth, y, badgeWidth, badgeHeight, "F");
+    
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.3);
+    const sx = pageWidth - 15 - (badgeWidth / 2);
+    const sy = y + 8;
+    doc.line(sx - 2, sy - 2, sx + 2, sy - 2);
+    doc.line(sx - 2, sy - 2, sx - 2, sy);
+    doc.line(sx + 2, sy - 2, sx + 2, sy);
+    doc.line(sx - 2, sy, sx, sy + 3.5);
+    doc.line(sx + 2, sy, sx, sy + 3.5);
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("SECURE", sx, y + 16, { align: "center" });
+    doc.setFontSize(4);
+    doc.setFont("helvetica", "normal");
+    doc.text("ENCRYPTION VERIFIED", sx, y + 21, { align: "center" });
+
+    // --- 5. FOOTER ---
+    // Ensure footer is always on the bottom of current page
+    const footerY = Math.max(y + 40, pageHeight - 25);
+
+    doc.setDrawColor(226, 232, 240);
+    doc.line(15, footerY, pageWidth - 15, footerY);
+    
+    doc.setTextColor(6, 78, 59); // Dark green
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("Check-it PRO", 15, footerY + 5);
+    
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    doc.text(`© ${new Date().getFullYear()} Checkit Pro Security. All rights reserved. Generated via Checkit Pro Suite.`, 15, footerY + 10);
+    
+    doc.setTextColor(16, 185, 129);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("ESTIMATED STORAGE VALID FOR 30 DAYS CONTINGENT UPON NETWORK PARAMETERS.", 15, footerY + 18);
+    
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    doc.text("Terms of Service  |  Privacy Policy  |  Technical Support", pageWidth - 15, footerY + 10, { align: "right" });
+
+    doc.save(`Checkit_Audit_${customer.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+  };
+
+
+  const resetAll = () => {
+    if (confirm("Start a new project? This will clear all current settings.")) {
+      setCurrentProjectId(null);
+      setCustomerName('');
+      setCustomerPhone("");
+      setCustomerEmail("");
+      setCustomerLogo(null);
+      setCameraGroups([{ 
+        id: Date.now().toString(), 
+        count: 32, 
+        resolution: '8', 
+        bitrate: 8, 
+        compression: "H.265+ High Efficiency" 
+      }]);
+      setDays(30);
+      setMode('24');
+      setSearchQuery('');
+      setExistingTB(4);
+      setAdditionalNotes("• Storage architecture assumes RAID 6 configuration for maximum data integrity.\n• Dedicated surveillance-grade drives (enterprise-class) are required for 24/7 duty cycles.\n• Network bandwidth assessment recommended for centralized recording server.");
+      setProjectDeadline("");
+      setProjectManager("");
+      showTemporarySuccess("Audit board reset successfully");
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  return (
+    <div className="min-h-screen py-8 px-4 bg-zinc-950 text-zinc-100 font-sans pb-20 selection:bg-emerald-500/30">
+      {/* Notifications */}
+      <AnimatePresence>
+        {successMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            className="fixed top-6 left-1/2 z-50 bg-emerald-600 text-white px-8 py-4 rounded-3xl flex items-center gap-3 shadow-2xl shadow-emerald-900/40 border border-emerald-400/20"
+          >
+            <CheckCircle2 className="w-5 h-5" />
+            <span className="font-bold text-sm tracking-tight">{successMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="max-w-xl mx-auto pt-4">
+        <header className="flex flex-col items-center justify-between gap-10 mb-12 sm:mb-16">
+          <div className="flex flex-col items-center text-center space-y-3 w-full">
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+              <h1 className="text-5xl sm:text-7xl font-black tracking-tighter text-white leading-none">Checkit</h1>
+              <span className="text-5xl sm:text-7xl font-thin text-emerald-500 leading-none">Pro</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="h-px w-10 bg-emerald-500/30 hidden sm:block" />
+              <p className="text-emerald-500/80 text-[11px] sm:text-[13px] font-black tracking-[0.6em] uppercase">
+                Storage Planning Suite
+              </p>
+              <div className="h-px w-10 bg-emerald-500/30 hidden sm:block" />
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 w-full mt-2">
+            <button 
+              type="button"
+              onClick={() => setShowProjectsModal(true)}
+              className="px-6 py-5 bg-zinc-900 hover:bg-zinc-800 rounded-3xl flex items-center justify-center gap-3 text-xs font-black uppercase tracking-[0.2em] border border-zinc-800 transition-all active:scale-95 shadow-xl text-zinc-400 group"
+            >
+              <Folder className="w-5 h-5 text-emerald-500" /> 
+              <span>Projects</span>
+            </button>
+            <button 
+              type="button"
+              onClick={resetAll}
+              className="px-6 py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-3xl flex items-center justify-center gap-3 text-xs font-black uppercase tracking-[0.2em] border border-emerald-500/20 transition-all active:scale-95 shadow-xl shadow-emerald-500/10 group"
+            >
+              <RotateCcw className="w-5 h-5 text-white" /> 
+              <span>New Audit</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Project & Client Card */}
+        <div className="bg-zinc-900 rounded-3xl p-6 mb-6 border border-zinc-800 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row gap-6">
+            <div className="flex flex-col items-center gap-3">
+              <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest ml-1 self-start">Client Logo</label>
+              <label className="relative w-32 h-32 sm:w-36 sm:h-36 bg-zinc-800/50 rounded-3xl flex flex-col items-center justify-center border-2 border-dashed border-zinc-700/50 hover:border-emerald-500/30 transition-all cursor-pointer overflow-hidden group">
+                {customerLogo ? (
+                  <>
+                    <img src={customerLogo} alt="Client Logo" className="w-full h-full object-contain p-4 transition-transform group-hover:scale-105" />
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <span className="text-[10px] font-black text-white uppercase tracking-widest">Change Logo</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-10 h-10 bg-zinc-900 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <Camera className="w-5 h-5 text-zinc-600" />
+                    </div>
+                    <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Upload Logo</span>
+                  </>
+                )}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, setCustomerLogo)} />
+              </label>
+              {customerLogo && (
+                <button 
+                  onClick={() => setCustomerLogo(null)} 
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-red-500/70 hover:text-red-500 uppercase tracking-widest transition-colors"
+                >
+                  <X className="w-3 h-3" /> Remove
+                </button>
+              )}
+            </div>
+
+            <div className="flex-1 space-y-6">
+              <div>
+                <label className="block text-zinc-400 text-xs font-bold uppercase tracking-widest mb-3 ml-1">Project Name / Client</label>
+                <input 
+                  type="text" 
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="e.g. Federico - Office" 
+                  className="w-full bg-zinc-800 border border-zinc-700/50 rounded-2xl px-5 py-4 text-xl font-bold focus:border-emerald-500/50 outline-none transition-all placeholder:text-zinc-700 text-white"
+                />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Client Phone</label>
+                  <input 
+                    type="text" 
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    placeholder="+267 ..." 
+                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-4 py-3 text-sm focus:border-emerald-500/30 outline-none text-zinc-300 transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Client Email</label>
+                  <input 
+                    type="email" 
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    placeholder="client@example.com" 
+                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-4 py-3 text-sm focus:border-emerald-500/30 outline-none text-zinc-300 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Configuration Card */}
+        <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800 space-y-8">
+          {/* Recorder Specifications */}
+          <div className="bg-emerald-500/5 p-6 rounded-[2rem] border border-emerald-500/10 space-y-6">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <Database className="w-4 h-4 text-emerald-500" />
+              <h3 className="text-zinc-400 text-xs font-bold uppercase tracking-widest">Recorder Specifications</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Project Context</label>
+                <select 
+                  value={projectContext}
+                  onChange={(e) => setProjectContext(e.target.value as "new" | "upgrade")}
+                  className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 font-bold text-sm text-white focus:border-emerald-500/50 outline-none cursor-pointer"
+                >
+                  <option value="new">New Installation</option>
+                  <option value="upgrade">Upgrade / Existing System</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">DVR/NVR Brand</label>
+                <select 
+                  value={recorderBrand}
+                  onChange={(e) => setRecorderBrand(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 font-bold text-sm text-white focus:border-emerald-500/50 outline-none cursor-pointer"
+                >
+                  <option value="Hikvision">Hikvision</option>
+                  <option value="Dahua">Dahua</option>
+                  <option value="SunCreat">SunCreat</option>
+                  <option value="Samsung">Samsung</option>
+                  <option value="Uniview">Uniview</option>
+                  <option value="Other">Other Brand</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Channel Capacity</label>
+                  <select 
+                    value={channels}
+                    onChange={(e) => setChannels(parseInt(e.target.value))}
+                    className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 font-bold text-sm text-white focus:border-emerald-500/50 outline-none cursor-pointer"
+                  >
+                    {[4, 8, 16, 32, 64, 128].map(ch => (
+                      <option key={ch} value={ch}>{ch} Channels</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">HDD System Slots</label>
+                  <select 
+                    value={hddSlots}
+                    onChange={(e) => setHddSlots(parseInt(e.target.value))}
+                    className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 font-bold text-sm text-white focus:border-emerald-500/50 outline-none cursor-pointer"
+                  >
+                    {[1, 2, 4, 8, 16].map(slot => (
+                      <option key={slot} value={slot}>{slot} {slot === 1 ? 'HDD Bay' : 'HDD Bays'}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Existing Storage (HDD TB)</label>
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      value={existingTB}
+                      onChange={(e) => setExistingTB(Math.max(0, parseFloat(e.target.value) || 0))}
+                      placeholder="e.g. 4"
+                      className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 font-bold text-sm focus:border-emerald-500/50 outline-none text-white transition-all shadow-inner"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[8px] font-bold text-zinc-600">TB</span>
+                  </div>
+                </div>
+                <div className="flex items-center">
+                  {parseFloat(results.totalBuffered) > (hddSlots * 10) && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl flex gap-3 items-start animate-pulse">
+                      <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-amber-200 font-bold leading-tight">
+                        <span className="text-amber-500 uppercase block mb-1">Capacity Warning</span>
+                        Target ({results.totalBuffered}TB) exceeds standard capacity for {hddSlots} bay(s). Recommend unit with more HDD slots.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <p className="mt-3 text-[9px] text-zinc-500 font-medium uppercase tracking-tight ml-1 italic flex items-center gap-1.5 leading-relaxed">
+                <AlertCircle className="w-3 h-3 text-emerald-500 flex-shrink-0" /> 
+                {projectContext === 'upgrade' 
+                  ? `Unit is EXISTING. With ${existingTB}TB across ${hddSlots} bay(s), system can handle approx. ${results.daysWithCurrent} days.`
+                  : `New project required. Total required storage (${results.totalBuffered}TB) suggests a ${hddSlots >= Math.ceil(parseFloat(results.totalBuffered)/10) ? 'compatible' : 'higher slot'} recorder.`}
+              </p>
+            </div>
+          </div>
+
+          {/* Camera Search Bar */}
+          <div ref={searchRef} className="relative group">
+            <label className="block text-zinc-400 text-xs font-bold uppercase tracking-widest mb-3 ml-1">Search Camera Model</label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (filteredSuggestions.length > 0 && showSuggestions) {
+                        selectSuggestion(filteredSuggestions[0]);
+                      } else {
+                        handleSearch();
+                      }
+                    }
+                    if (e.key === 'Escape') setShowSuggestions(false);
+                  }}
+                  placeholder="Enter model (e.g. Hikvision 4K, DS-2CD...)" 
+                  className="w-full bg-zinc-800 border border-zinc-700/50 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold focus:border-emerald-500/50 outline-none text-white placeholder:text-zinc-700 transition-all"
+                />
+                
+                {/* Suggestions Dropdown */}
+                <AnimatePresence>
+                  {showSuggestions && filteredSuggestions.length > 0 && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="absolute z-50 left-0 right-0 mt-2 bg-zinc-800 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl"
+                    >
+                      <div className="p-2">
+                        {filteredSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.name}
+                            onClick={() => selectSuggestion(suggestion)}
+                            className="w-full flex items-center justify-between p-3 hover:bg-zinc-700/50 rounded-xl transition-all group text-left"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-zinc-900 rounded-lg flex items-center justify-center">
+                                <Video className="w-4 h-4 text-emerald-500" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-white">{suggestion.name}</p>
+                                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">{suggestion.resolution}MP @ {suggestion.bitrate}Mbps</p>
+                              </div>
+                            </div>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </button>
+                        ))}
+                      </div>
+                      <div className="bg-zinc-900/50 px-4 py-2 border-t border-zinc-700 flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Database Suggestions</span>
+                        <span className="text-[9px] text-zinc-600 italic">Press Enter to select first</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              <button 
+                onClick={handleSearch}
+                className="px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2 shadow-lg shadow-emerald-500/10 h-[52px]"
+              >
+                Search
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-zinc-400 text-xs font-bold uppercase tracking-widest">Camera Configurations</h3>
+              <button 
+                onClick={() => addCameraGroup()}
+                className="flex items-center gap-2 text-emerald-500 hover:text-emerald-400 text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                <Video className="w-4 h-4" /> Add Group
+              </button>
+            </div>
+
+            <AnimatePresence mode="popLayout">
+              {cameraGroups.map((group, index) => (
+                <motion.div 
+                  key={group.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-zinc-800/30 rounded-[2rem] p-6 border border-zinc-800 group relative"
+                >
+                  <div className="absolute -top-2 -left-2 w-6 h-6 bg-emerald-600 text-white rounded-lg flex items-center justify-center text-[10px] font-black shadow-lg">
+                    {index + 1}
+                  </div>
+                  
+                  {cameraGroups.length > 1 && (
+                    <button 
+                      onClick={() => removeCameraGroup(group.id)}
+                      className="absolute -top-2 -right-2 w-6 h-6 bg-zinc-800 hover:bg-red-500 text-zinc-500 hover:text-white rounded-lg flex items-center justify-center transition-all shadow-lg border border-zinc-700"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Group Name (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={group.label || ""}
+                        onChange={(e) => updateGroup(group.id, { label: e.target.value })}
+                        placeholder="e.g. Entrance Cameras / Warehouse"
+                        className="w-full bg-zinc-900/50 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs font-bold focus:border-emerald-500/50 outline-none text-white transition-all placeholder:text-zinc-700"
+                      />
+                    </div>
+
+                    {group.name && (
+                      <div className="pb-4 border-b border-zinc-700/30">
+                        <p className="text-emerald-500 text-[10px] font-black uppercase tracking-widest mb-1">Detected Model</p>
+                        <p className="text-sm font-bold text-white">{group.name}</p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Camera Count</label>
+                        <input 
+                          type="number" 
+                          value={group.count}
+                          onChange={(e) => updateGroup(group.id, { count: Math.max(1, parseInt(e.target.value) || 0) })}
+                          className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 text-2xl font-bold focus:border-emerald-500/50 outline-none text-white transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Resolution</label>
+                        <select 
+                          value={group.resolution}
+                          onChange={(e) => updateGroup(group.id, { resolution: e.target.value })}
+                          className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 font-bold text-sm text-white focus:border-emerald-500/50 outline-none cursor-pointer"
+                        >
+                          <option value="2">2MP Full HD</option>
+                          <option value="3">3MP</option>
+                          <option value="4">4MP QHD</option>
+                          <option value="5">5MP</option>
+                          <option value="6">6MP</option>
+                          <option value="8">8MP 4K</option>
+                          <option value="custom">Custom Resolution (Input MP)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {group.resolution === 'custom' && (
+                      <div className="relative pt-2">
+                        <label className="block text-zinc-500 text-[9px] font-black uppercase tracking-widest mb-1.5 ml-1">Input Megapixels (MP)</label>
+                        <input 
+                          type="number"
+                          value={group.customMP || 12}
+                          onChange={(e) => updateGroup(group.id, { customMP: Math.max(1, parseInt(e.target.value) || 0) })}
+                          className="w-full bg-zinc-900/50 border border-emerald-500/20 rounded-xl px-4 py-3 text-center text-xl font-bold text-emerald-400 focus:border-emerald-500/50 outline-none"
+                        />
+                        <span className="absolute right-4 top-[60%] -translate-y-1/2 text-[10px] font-bold text-zinc-600">MP</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-3 ml-1">Compression</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {['H.264', 'H.265', 'H.265+ High Efficiency'].map((type) => (
+                          <button
+                            key={type}
+                            onClick={() => updateGroup(group.id, { compression: type })}
+                            className={`py-2 px-1 rounded-lg text-[9px] font-black uppercase tracking-tight border transition-all ${
+                              group.compression === type 
+                                ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg' 
+                                : 'bg-zinc-900 border-zinc-700 text-zinc-500 hover:text-zinc-300'
+                            }`}
+                          >
+                            {type === 'H.265+ High Efficiency' ? 'H.265+' : type}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+                      <div>
+                        <label className="block text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">Bitrate (Mbps)</label>
+                        <input 
+                          type="number" 
+                          step="0.1"
+                          value={group.bitrate}
+                          onChange={(e) => updateGroup(group.id, { bitrate: Math.max(0.1, parseFloat(e.target.value) || 0) })}
+                          className="w-full bg-zinc-900 border border-zinc-700/50 rounded-xl px-4 py-3 text-xl font-bold focus:border-emerald-500/50 outline-none text-white transition-all"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+
+          <div className="pt-8 border-t border-zinc-800 space-y-8">
+            <div>
+              <label className="block text-zinc-400 text-xs font-bold uppercase tracking-widest mb-3 ml-1">Retention Duration (Days)</label>
+              <input 
+                type="number" 
+                value={days}
+                onChange={(e) => setDays(Math.max(1, parseInt(e.target.value) || 0))}
+                className="w-full bg-zinc-800 border border-zinc-700/50 rounded-2xl px-6 py-5 text-center text-4xl font-bold focus:border-emerald-500/50 outline-none text-white appearance-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 text-xs font-bold uppercase tracking-widest mb-4 ml-1">Recording Schedule</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: '24', label: '24/7' },
+                  { id: 'motion', label: 'Motion' },
+                  { id: 'alarm', label: 'Alarm' }
+                ].map((m) => (
+                  <button 
+                    key={m.id}
+                    onClick={() => setMode(m.id as any)}
+                    className={`py-4 rounded-2xl font-bold uppercase text-[10px] tracking-widest transition-all border ${mode === m.id ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300 border-zinc-700/50'}`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {mode === 'alarm' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-4 flex items-center gap-4 bg-zinc-900/50 p-4 rounded-2xl border border-emerald-500/10"
+                >
+                  <div className="flex-1">
+                    <label className="block text-zinc-500 text-[10px] font-black uppercase tracking-widest mb-1 ml-1">Alarm Hours/Day</label>
+                    <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-tight ml-1">Triggered recording duration</p>
+                  </div>
+                  <div className="relative w-24">
+                    <input 
+                      type="number" 
+                      value={alarmHours}
+                      onChange={(e) => setAlarmHours(Math.max(1, Math.min(24, parseInt(e.target.value) || 0)))}
+                      className="w-full bg-zinc-800 border border-emerald-500/30 rounded-xl px-3 py-2 text-center text-lg font-bold text-emerald-400 outline-none focus:border-emerald-500"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-zinc-600">Hrs</span>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Installer & PDF Settings (Professional Extras) */}
+        <div className="mt-6 flex flex-col gap-4">
+           <details className="group">
+            <summary className="bg-zinc-900 rounded-2xl px-6 py-3 cursor-pointer text-xs font-bold text-zinc-500 hover:bg-zinc-800 transition-colors flex items-center justify-between border border-zinc-800 select-none list-none">
+              <span className="flex items-center gap-2 uppercase tracking-widest">
+                <Sliders className="w-3.5 h-3.5" /> Professional Branding & Settings
+              </span>
+              <X className="w-3.5 h-3.5 rotate-45 group-open:rotate-0 transition-transform" />
+            </summary>
+            
+            <div className="bg-zinc-900 rounded-3xl p-6 mt-4 border border-zinc-800 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Installer Entity</label>
+                  <input 
+                    type="text" 
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Installer Department</label>
+                  <input 
+                    type="text" 
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Company Logo</label>
+                  <div className="flex items-center gap-4">
+                    {companyLogo ? (
+                      <div className="relative group">
+                        <img src={companyLogo} alt="Company Logo" className="h-12 w-24 object-contain bg-white rounded-lg p-1 border border-zinc-700" />
+                        <button 
+                          onClick={() => setCompanyLogo(null)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex-1 flex flex-col items-center justify-center h-12 border-2 border-dashed border-zinc-700 rounded-xl hover:border-emerald-500/50 hover:bg-emerald-500/5 cursor-pointer transition-all">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">Upload PNG/JPG</span>
+                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, setCompanyLogo)} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Company Phone</label>
+                  <input 
+                    type="text" 
+                    value={companyPhone}
+                    onChange={(e) => setCompanyPhone(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Company Email</label>
+                  <input 
+                    type="text" 
+                    value={companyEmail}
+                    onChange={(e) => setCompanyEmail(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Client Logo</label>
+                  <div className="flex items-center gap-4">
+                    {customerLogo ? (
+                      <div className="relative group">
+                        <img src={customerLogo} alt="Client Logo" className="h-12 w-24 object-contain bg-white rounded-lg p-1 border border-zinc-700" />
+                        <button 
+                          onClick={() => setCustomerLogo(null)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex-1 flex flex-col items-center justify-center h-12 border-2 border-dashed border-zinc-700 rounded-xl hover:border-emerald-500/50 hover:bg-emerald-500/5 cursor-pointer transition-all">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-tight">Upload Client PNG/JPG</span>
+                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, setCustomerLogo)} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">PDF Audit Header</label>
+                  <input 
+                    type="text" 
+                    value={customHeader}
+                    onChange={(e) => setCustomHeader(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">PDF Corporate Footer</label>
+                  <input 
+                    type="text" 
+                    value={customFooter}
+                    onChange={(e) => setCustomFooter(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-zinc-800/50">
+                <label className="block text-emerald-500/70 mb-4 text-[10px] font-black uppercase tracking-[0.2em] ml-1">Project Settings</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Project Deadline</label>
+                    <input 
+                      type="date" 
+                      value={projectDeadline}
+                      onChange={(e) => setProjectDeadline(e.target.value)}
+                      className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Project Manager</label>
+                    <input 
+                      type="text" 
+                      value={projectManager}
+                      onChange={(e) => setProjectManager(e.target.value)}
+                      placeholder="e.g. John Doe / Lead Engineer"
+                      className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-xs text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {currentProjectId && (projects.find(p => p.id === currentProjectId)?.history?.length ?? 0) > 0 && (
+                <div className="pt-6 border-t border-zinc-800/50">
+                  <label className="block text-emerald-500/70 mb-4 text-[10px] font-black uppercase tracking-[0.2em] ml-1">Project Change History</label>
+                  <div className="space-y-2">
+                    {projects.find(p => p.id === currentProjectId)?.history?.map((entry: any) => (
+                      <div key={entry.id} className="bg-zinc-800/40 rounded-xl p-4 flex items-center justify-between group hover:bg-zinc-800/60 transition-colors border border-transparent hover:border-zinc-700/30">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center">
+                            <RotateCcw className="w-3.5 h-3.5 text-zinc-600" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-zinc-300 font-bold">{entry.timestamp}</p>
+                            <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">
+                              {entry.snapshot.numCameras} Cams • {entry.snapshot.days} Days • {entry.snapshot.bitrate} Mbps
+                            </p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => revertToHistory(entry.snapshot)}
+                          className="px-3 py-1.5 bg-zinc-900 group-hover:bg-emerald-600 text-[9px] font-black uppercase tracking-widest rounded-lg text-zinc-500 group-hover:text-white transition-all"
+                        >
+                          Revert
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-zinc-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest ml-1">Audit Implementation Notes</label>
+                <textarea 
+                  value={additionalNotes}
+                  onChange={(e) => setAdditionalNotes(e.target.value)}
+                  rows={4}
+                  className="w-full bg-zinc-800 border border-zinc-700/50 rounded-xl px-4 py-3 text-xs text-zinc-300 resize-none leading-relaxed"
+                />
+              </div>
+
+              <button 
+                onClick={saveProject}
+                className="w-full py-4 bg-zinc-800 hover:bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest border border-zinc-700 transition-all flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" /> Save Project to Ledger
+              </button>
+            </div>
+          </details>
+        </div>
+
+        {/* Results area - Re-styled for the target template */}
+        <div className="mt-8 bg-zinc-900 rounded-3xl p-8 border border-zinc-800 shadow-xl overflow-hidden relative">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-3xl rounded-full" />
+          
+          <div className="text-center relative z-10">
+            <p className="text-emerald-400 text-xs font-black tracking-[0.4em] uppercase">Total Capacity Required</p>
+            <p className="text-7xl font-bold text-white mt-4 flex items-baseline justify-center gap-3 tracking-tighter">
+              {results.total} <span className="text-4xl text-zinc-500/50 font-black">TB</span>
+            </p>
+            {existingTB > 0 && (
+              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+                <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500/80">
+                  Existing {existingTB}TB HDD: <span className="text-white underline decoration-emerald-500/50 decoration-2 underline-offset-4">{results.daysWithCurrent} Days</span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-8 space-y-3 max-w-lg mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button 
+                onClick={() => setShowReportPreview(true)}
+                className="py-3 bg-white hover:bg-zinc-100 text-black rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-md w-full"
+              >
+                <Eye className="w-3.5 h-3.5" /> Live Preview
+              </button>
+              
+              <button 
+                onClick={generatePDF}
+                className="py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-md shadow-emerald-500/10 w-full"
+              >
+                <FileDown className="w-3.5 h-3.5" /> Export PDF
+              </button>
+            </div>
+
+            <button 
+              onClick={saveProject}
+              className="py-3 w-full bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-md border border-zinc-700"
+            >
+              <Save className="w-3.5 h-3.5 text-emerald-500" /> Save audit configuration
+            </button>
+          </div>
+        </div>
+
+        <footer className="mt-20 text-center opacity-30">
+          <p className="text-zinc-600 text-[10px] font-bold tracking-[0.2em] uppercase">Built for high-end surveillance architecture by Checkit Pro</p>
+        </footer>
+      </div>
+
+
+
+
+      {/* Projects Modal */}
+      <AnimatePresence>
+        {showProjectsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowProjectsModal(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-3xl"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-xl bg-zinc-950 rounded-[3rem] border border-zinc-800 shadow-2xl p-10 max-h-[85vh] flex flex-col"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-3xl font-black text-white tracking-tight">Project Ledger</h3>
+                <button onClick={() => setShowProjectsModal(false)} className="p-3 bg-zinc-900 rounded-2xl hover:bg-zinc-800 transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+                {projects.length === 0 ? (
+                  <div className="text-center py-20 bg-zinc-900/30 rounded-[2rem] border border-dashed border-zinc-800">
+                    <p className="text-zinc-600 font-bold uppercase tracking-widest text-xs">No project history found</p>
+                  </div>
+                ) : (
+                  projects.map(p => (
+                    <div 
+                      key={p.id}
+                      onClick={() => loadProject(p)}
+                      className="group p-6 rounded-[2rem] bg-zinc-900/50 hover:bg-emerald-600 cursor-pointer transition-all border border-zinc-800 hover:border-emerald-400 flex justify-between items-center"
+                    >
+                      <div>
+                        <p className="font-black text-white group-hover:text-emerald-950 transition-colors uppercase tracking-tight text-lg">{p.name || "UNNAMED ENTITY"}</p>
+                        <p className="text-[10px] text-zinc-500 group-hover:text-emerald-900 font-bold mt-1 uppercase tracking-widest">{p.date} • {p.numCameras} CAMERAS • {p.days} DAYS</p>
+                      </div>
+                      <button 
+                        onClick={(e) => { 
+                          e.preventDefault();
+                          e.stopPropagation(); 
+                          deleteProject(p.id); 
+                        }}
+                        className="p-3 text-emerald-300 hover:text-white rounded-xl bg-emerald-700/50 hover:bg-red-500 transition-all z-10"
+                        title="Delete Project"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Report Preview Modal */}
+      <AnimatePresence>
+        {showReportPreview && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowReportPreview(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[95vh] flex flex-col"
+            >
+              <div className="absolute top-4 right-4 md:top-6 md:right-6 z-10">
+                <button 
+                  onClick={() => setShowReportPreview(false)}
+                  className="p-2 md:p-3 bg-zinc-100/90 backdrop-blur hover:bg-zinc-200 text-zinc-500 rounded-full transition-colors flex items-center gap-2 font-bold text-[10px]"
+                >
+                  <X className="w-4 h-4" /> <span className="hidden md:inline">CLOSE PREVIEW</span>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-zinc-50/50 custom-scrollbar">
+                <div className="w-full max-w-[800px] mx-auto bg-white shadow-sm border border-zinc-100 p-8 md:p-16 flex flex-col font-sans origin-top scale-[0.6] xs:scale-[0.7] sm:scale-85 md:scale-90 lg:scale-100 mb-[-400px] xs:mb-[-300px] sm:mb-[-150px] md:mb-0">
+                  {/* Header */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start gap-6 mb-16">
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-0.5">{companyName || "SecureWatch Solutions Inc."}</h2>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">{department}</p>
+                      </div>
+                      {companyLogo && (
+                        <div className="mt-2">
+                          <img src={companyLogo} alt="Company Branding" className="h-16 w-48 object-contain object-left" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-left sm:text-right w-full sm:w-auto mt-4 sm:mt-0 pt-4 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                      <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-1">Client</p>
+                      <h3 className="text-sm font-black text-slate-900 mb-4">{customerName || "Global Logistics Hub"}</h3>
+                      
+                      <div className="grid grid-cols-2 sm:block gap-4">
+                        <div className="mb-4">
+                          <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-1">Quote Date</p>
+                          <p className="text-xs font-medium text-slate-600">{new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                        </div>
+                        
+                        {(projectDeadline || projectManager) && (
+                          <div className="space-y-4">
+                            {projectDeadline && (
+                              <div>
+                                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-1">Target Deadline</p>
+                                <p className="text-xs font-medium text-slate-600">{new Date(projectDeadline).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                              </div>
+                            )}
+                            {projectManager && (
+                              <div>
+                                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-1">Project Lead</p>
+                                <p className="text-xs font-medium text-slate-600">{projectManager}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Icon Checkmark top right area */}
+                  <div className="flex justify-end pr-4 mb-2">
+                    <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                      <Check className="w-6 h-6 text-white stroke-[4]" />
+                    </div>
+                  </div>
+
+                  {/* Specifications Card */}
+                  <div className="bg-slate-50/80 rounded-xl p-6 md:p-10 border border-slate-100 mb-10">
+                    <h3 className="text-lg font-black text-slate-900 tracking-tight mb-8">PROJECT AUDIT DETAILS</h3>
+                    
+                    <div className="space-y-8">
+                       {/* Global Settings */}
+                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-y-8 gap-x-6 pb-8 border-b border-slate-200">
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Retention Period</p>
+                            <p className="text-[13px] font-bold text-slate-900">{days} Days Target</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Recording Mode</p>
+                            <p className="text-[13px] font-bold text-slate-900">{mode === '24' ? "24/7 Continuous" : mode === 'motion' ? "Motion Only" : `Alarm Event (${alarmHours}h)`}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Total Camera Units</p>
+                            <p className="text-[13px] font-bold text-slate-900">{numCameras} Devices</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Avg. Bitrate</p>
+                            <p className="text-[13px] font-bold text-slate-900">{results.avgBitrate} Mbps</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Recorder Brand</p>
+                            <p className="text-[13px] font-bold text-slate-900">{recorderBrand}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">HDD Capacity</p>
+                            <p className="text-[13px] font-bold text-slate-900">{hddSlots} Bays</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Channel Capacity</p>
+                            <p className="text-[13px] font-bold text-slate-900">{channels} Channels</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">Existing Storage</p>
+                            <p className="text-[13px] font-bold text-slate-900">{existingTB} TB HDD</p>
+                          </div>
+                          <div className="bg-emerald-50 border border-emerald-100 p-2 rounded-lg">
+                            <p className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.1em] mb-1">Existing Retention</p>
+                            <p className="text-[13px] font-black text-emerald-700">{results.daysWithCurrent} Days</p>
+                          </div>
+                       </div>
+
+                       {/* Camera Groups */}
+                       <div className="space-y-4">
+                         <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Device Breakdown</p>
+                         <div className="grid grid-cols-1 gap-3">
+                           {cameraGroups.map((group, idx) => (
+                             <div key={group.id} className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                               <div className="flex items-center gap-4">
+                                 <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center text-emerald-600 font-black text-xs">
+                                   {idx + 1}
+                                 </div>
+                                 <div className="flex-1">
+                                   {group.label && (
+                                     <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">{group.label}</p>
+                                   )}
+                                   <p className="text-xs font-black text-slate-900">{group.count}x {group.resolution === 'custom' ? `${group.customMP}MP` : group.resolution + 'MP'} Cameras</p>
+                                   <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tight">{group.compression} @ {group.bitrate} Mbps</p>
+                                 </div>
+                               </div>
+                               <div className="text-right">
+                                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Subtotal</p>
+                                  <p className="text-xs font-black text-slate-900">
+                                    {((group.bitrate * 3600 * (mode === '24' ? 24 : mode === 'motion' ? 12 : alarmHours) * group.count * days) / (8 * 1024 * 1024)).toFixed(2)} TB
+                                  </p>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Block Wrapper (Storage + Notes) */}
+                  <div className="space-y-6">
+                    {/* Total Storage Card */}
+                    <div className="py-2 relative">
+                      {/* Watermark Logo Background */}
+                      {companyLogo && (
+                        <img src={companyLogo} alt="" className="absolute inset-x-0 h-24 opacity-[0.03] grayscale mx-auto pointer-events-none" />
+                      )}
+
+                      <div className="relative group w-full flex justify-center">
+                         <div className="relative w-full max-w-[280px] bg-white border-2 border-slate-900 rounded-sm p-4 md:p-6 text-center">
+                            <div className="flex justify-center mb-2">
+                              <Database className="w-4 h-4 text-emerald-500" />
+                            </div>
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.1em] mb-1">Total Storage Required</p>
+                            <div className="flex items-baseline justify-center gap-2">
+                              <span className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter">{results.total}</span>
+                              <span className="text-sm md:text-lg font-black text-emerald-500 tracking-tight">TB</span>
+                            </div>
+                            <div className="mt-3">
+                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                                RETENTION WITH {existingTB}TB HDD: <span className="text-emerald-600 font-black underline">{results.daysWithCurrent} DAYS</span>
+                              </p>
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-slate-100">
+                              <p className="text-[7px] font-medium text-slate-400 italic">Target: {days} Days. Redundancy buffer included.</p>
+                            </div>
+                         </div>
+                      </div>
+                    </div>
+
+                    {/* Footer Section (Notes & badge) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 md:gap-4">
+                       <div className="lg:col-span-4 bg-slate-50 border border-slate-100 rounded-xl p-3 md:p-4">
+                          <h4 className="text-[8px] font-black text-emerald-500 uppercase tracking-widest mb-3">IMPLEMENTATION NOTES</h4>
+                          <div className="space-y-2">
+                             {additionalNotes.split('\n').filter(l => l.trim()).slice(0, 3).map((note, i) => (
+                               <div key={i} className="flex gap-2">
+                                 <div className="mt-0.5 w-3 h-3 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                                   <Check className="w-1.5 h-1.5 text-emerald-600 stroke-[3]" />
+                                 </div>
+                                 <p className="text-[9px] leading-relaxed text-slate-600 font-medium">{note.replace(/^[•\-\*]\s*/, '')}</p>
+                               </div>
+                             ))}
+                          </div>
+                       </div>
+
+                       <div className="bg-emerald-950 rounded-xl p-4 flex flex-col items-center justify-center text-center">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-900/50 flex items-center justify-center mb-2 border border-emerald-800">
+                            <ShieldCheck className="w-5 h-5 text-white" />
+                          </div>
+                          <h4 className="text-sm font-black text-white tracking-widest mb-0.5 uppercase">SECURE</h4>
+                          <p className="text-[7px] font-medium text-emerald-500/80 uppercase tracking-tighter">Verified</p>
+                       </div>
+                    </div>
+                  </div>
+
+                  {/* Fine Print Footer */}
+                  <div className="mt-20 pt-10 border-t border-slate-100 flex justify-between items-end">
+                    <div>
+                      <h5 className="text-[10px] font-black text-emerald-900 uppercase tracking-widest mb-1">Check-it PRO</h5>
+                      <p className="text-[8px] text-slate-400 leading-relaxed font-medium">
+                        © {new Date().getFullYear()} Checkit Pro Security. All rights reserved.<br/>
+                        Generated via Checkit Pro Suite.
+                      </p>
+                      <p className="text-[9px] font-bold text-emerald-600 mt-4 uppercase max-w-md">
+                        This Calculated storage is an estimate valid for 30 days, contingent upon maintaining current network parameters and camera uptime.
+                      </p>
+                    </div>
+                    <div className="flex gap-6 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                       <span>Terms of Service</span>
+                       <span>Privacy Policy</span>
+                       <span>Technical Support</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 bg-white border-t border-zinc-100 flex justify-center gap-4">
+                <button 
+                  onClick={generatePDF}
+                  className="px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                >
+                  Confirm & Export PDF
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
